@@ -59,6 +59,13 @@ function renderReceipt(entry) {
   return `<span class="receipt-link" title="${entry.receiptKey}">s3://…/${entry.receiptKey.split('/').pop()}</span>`;
 }
 
+function renderAction(entry) {
+  if (entry.stage !== 'ALERTED') {
+    return '<span style="color: var(--muted)">—</span>';
+  }
+  return `<button class="release-btn" data-txn-id="${entry.transactionId}">Release</button>`;
+}
+
 function renderRow(entry) {
   const tr = document.createElement('tr');
   tr.className = rowStatusClass(entry);
@@ -70,6 +77,7 @@ function renderRow(entry) {
     <td><span class="pill ${pillClass(entry.stage)}">${entry.stage.toLowerCase()}</span></td>
     <td>${renderRisk(entry)}</td>
     <td>${renderReceipt(entry)}</td>
+    <td>${renderAction(entry)}</td>
   `;
   return tr;
 }
@@ -92,7 +100,7 @@ async function refreshLedger() {
 
     ledgerBody.innerHTML = '';
     if (entries.length === 0) {
-      ledgerBody.innerHTML = '<tr class="empty-row"><td colspan="7">No transactions yet — authorize one on the left.</td></tr>';
+      ledgerBody.innerHTML = '<tr class="empty-row"><td colspan="8">No transactions yet — authorize one on the left.</td></tr>';
       return;
     }
 
@@ -165,5 +173,28 @@ settlementBtn.addEventListener('click', async () => {
   } finally {
     settlementBtn.disabled = false;
     settlementBtn.textContent = 'Run settlement batch';
+  }
+});
+
+// Release buttons are recreated on every poll, so delegate from the table body
+// rather than attaching a listener to each row individually.
+ledgerBody.addEventListener('click', async (evt) => {
+  const btn = evt.target.closest('.release-btn');
+  if (!btn) return;
+
+  const transactionId = btn.dataset.txnId;
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  try {
+    const res = await fetch(`/api/transactions/${transactionId}/release`, { method: 'POST' });
+    if (!res.ok) {
+      throw new Error(await res.text() || `Request failed (${res.status})`);
+    }
+    await refreshLedger();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Release';
+    alert('Failed to release: ' + err.message);
   }
 });

@@ -1,10 +1,12 @@
 package com.cardco.web;
 
 import com.cardco.config.AppConfig;
+import com.cardco.repository.TransactionRepository;
 import com.cardco.service.CardAuthorizationService;
 import com.cardco.service.SettlementService;
 import io.javalin.Javalin;
 import io.javalin.http.BadRequestResponse;
+import io.javalin.http.NotFoundResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,14 +21,16 @@ public class WebServer {
 
     private final CardAuthorizationService authorizationService;
     private final SettlementService settlementService;
+    private final TransactionRepository transactionRepository;
     private final TransactionFeed feed;
     private final AppConfig config;
     private Javalin app;
 
     public WebServer(CardAuthorizationService authorizationService, SettlementService settlementService,
-                      TransactionFeed feed, AppConfig config) {
+                      TransactionRepository transactionRepository, TransactionFeed feed, AppConfig config) {
         this.authorizationService = authorizationService;
         this.settlementService = settlementService;
+        this.transactionRepository = transactionRepository;
         this.feed = feed;
         this.config = config;
     }
@@ -87,6 +91,17 @@ public class WebServer {
             ));
         });
 
+        app.post("/api/transactions/{transactionId}/release", ctx -> {
+            String transactionId = ctx.pathParam("transactionId");
+            TransactionFeed.FeedEntry entry = feed.find(transactionId)
+                    .orElseThrow(() -> new NotFoundResponse("No such transaction: " + transactionId));
+
+            transactionRepository.updateStatus(entry.idempotencyKey, "AUTHORIZED");
+            feed.markReleased(transactionId);
+
+            ctx.json(Map.of("transactionId", transactionId, "status", "AUTHORIZED"));
+        });
+
         app.start(port);
         log.info("Dashboard running at http://localhost:{}", port);
     }
@@ -121,4 +136,5 @@ public class WebServer {
         }
     }
 }
+
 

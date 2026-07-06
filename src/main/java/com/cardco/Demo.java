@@ -100,7 +100,9 @@ public class Demo {
 
                 if (riskScore > 0.75) {
                     fraudAlertPublisher.publishHighRiskAlert(txn, riskScore);
+                    transactionRepository.updateStatus(txn.getIdempotencyKey(), "HELD_FOR_REVIEW");
                     System.out.println("   published SNS fraud alert for " + txn.getTransactionId());
+                    System.out.println("   held for review — excluded from the next settlement batch");
                 }
                 fraudCheckQueueClient.acknowledge(message);
             }

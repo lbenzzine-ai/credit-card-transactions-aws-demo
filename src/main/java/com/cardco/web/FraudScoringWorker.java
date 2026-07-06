@@ -3,6 +3,7 @@ package com.cardco.web;
 import com.cardco.messaging.FraudCheckQueueClient;
 import com.cardco.model.CardTransaction;
 import com.cardco.notification.FraudAlertPublisher;
+import com.cardco.repository.TransactionRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
@@ -17,9 +18,13 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Simulates the downstream fraud-scoring service: polls SQS on a fixed
- * schedule, scores each authorized transaction, publishes an SNS alert for
- * high-risk ones, and updates {@link TransactionFeed} so the dashboard
- * reflects the transaction's real progress through the pipeline.
+ * schedule, scores each authorized transaction, and for high-risk ones,
+ * publishes an SNS alert AND writes the transaction's real DynamoDB status
+ * to {@code HELD_FOR_REVIEW} — not just a dashboard label. This is what
+ * makes {@link com.cardco.service.SettlementService}'s
+ * {@code findByStatus("AUTHORIZED")} query correctly skip it: a flagged
+ * transaction is excluded from the next settlement batch until it's
+ * explicitly released (or declined), the same way a real fraud hold works.
  */
 public class FraudScoringWorker {
 
@@ -28,6 +33,7 @@ public class FraudScoringWorker {
 
     private final FraudCheckQueueClient queueClient;
     private final FraudAlertPublisher alertPublisher;
+    private final TransactionRepository transactionRepository;
     private final TransactionFeed feed;
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -38,9 +44,11 @@ public class FraudScoringWorker {
 
     public FraudScoringWorker(FraudCheckQueueClient queueClient,
                                FraudAlertPublisher alertPublisher,
+                               TransactionRepository transactionRepository,
                                TransactionFeed feed) {
         this.queueClient = queueClient;
         this.alertPublisher = alertPublisher;
+        this.transactionRepository = transactionRepository;
         this.feed = feed;
     }
 
@@ -63,6 +71,7 @@ public class FraudScoringWorker {
 
                 if (alerted) {
                     alertPublisher.publishHighRiskAlert(txn, riskScore);
+                    transactionRepository.updateStatus(txn.getIdempotencyKey(), "HELD_FOR_REVIEW");
                 }
                 feed.updateScore(txn.getTransactionId(), riskScore, alerted);
                 queueClient.acknowledge(message);
@@ -79,3 +88,4 @@ public class FraudScoringWorker {
         return txn.getAmount().compareTo(HIGH_VALUE_THRESHOLD) > 0 ? 0.92 : 0.15;
     }
 }
+

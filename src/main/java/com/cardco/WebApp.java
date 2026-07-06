@@ -50,10 +50,11 @@ public class WebApp {
 
         TransactionFeed feed = new TransactionFeed();
 
-        FraudScoringWorker worker = new FraudScoringWorker(fraudCheckQueueClient, fraudAlertPublisher, feed);
+        FraudScoringWorker worker = new FraudScoringWorker(
+                fraudCheckQueueClient, fraudAlertPublisher, transactionRepository, feed);
         worker.start();
 
-        WebServer server = new WebServer(authorizationService, settlementService, feed, config);
+        WebServer server = new WebServer(authorizationService, settlementService, transactionRepository, feed, config);
         int port = Integer.parseInt(System.getProperty("server.port", "7000"));
         server.start(port);
 

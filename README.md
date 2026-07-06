@@ -229,6 +229,32 @@ period (`schedule-key-deletion`) — the key keeps billing during that
 window, so tear down as soon as you're done rather than right before a
 billing cycle closes.
 
+## Starting fresh between runs
+
+By default, every run adds to what's already there — DynamoDB accumulates
+transactions, S3 accumulates receipts, and SQS can carry a backlog of
+unprocessed messages from earlier runs into your next one. This is realistic
+(a real system doesn't wipe itself between requests) but can make a single
+demo run confusing to reason about — e.g., a settlement batch settling more
+transactions than you just created, since it correctly picks up every
+`AUTHORIZED` transaction, including old ones.
+
+To wipe all **data** (not infrastructure) and start clean:
+
+```bash
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY   # needs admin, not the service account
+./infrastructure/reset-data.sh
+```
+
+This deletes and recreates the DynamoDB table (same schema + GSI), purges
+the SQS queue, and clears the S3 `receipts/`/`settlements/` prefixes. It
+does **not** touch the IAM role/user, KMS key, or SNS topic — no need to
+re-run `setup.sh` afterward, just re-export the service-account credentials
+and run the demo again.
+
+(The dashboard's ledger table resets automatically just by restarting
+`./run-webapp.sh` — that data only ever lived in memory, not AWS.)
+
 ## Tearing down
 
 ```bash
