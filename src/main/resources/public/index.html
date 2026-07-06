@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CardCo — Transaction Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+
+  <aside class="rail">
+    <div class="rail-brand">
+      <span class="rail-brand-mark">CC</span>
+      <div>
+        <div class="rail-brand-name">CardCo</div>
+        <div class="rail-brand-sub">transaction console</div>
+      </div>
+    </div>
+
+    <form id="txn-form" class="txn-form">
+      <div class="form-eyebrow">New Authorization</div>
+
+      <label>
+        <span>Merchant</span>
+        <input type="text" name="merchantId" placeholder="merchant-coffee-shop-01" required>
+      </label>
+
+      <label>
+        <span>Card number</span>
+        <input type="text" name="pan" placeholder="4111 1111 1111 1234" required minlength="12" maxlength="19">
+      </label>
+
+      <div class="form-row">
+        <label>
+          <span>Amount</span>
+          <input type="text" name="amount" placeholder="4.50" required pattern="[0-9]+(\.[0-9]{1,2})?">
+        </label>
+        <label class="currency-field">
+          <span>Currency</span>
+          <select name="currency">
+            <option>USD</option>
+            <option>EUR</option>
+            <option>GBP</option>
+          </select>
+        </label>
+      </div>
+
+      <button type="submit" id="submit-btn">Authorize</button>
+      <div id="form-error" class="form-error" hidden></div>
+    </form>
+
+    <div class="rail-footer">
+      <div class="rail-footer-row"><span>Region</span><span id="cfg-region">—</span></div>
+      <div class="rail-footer-row"><span>Table</span><span id="cfg-table">—</span></div>
+      <div class="rail-footer-row"><span>Bucket</span><span id="cfg-bucket">—</span></div>
+      <div class="rail-footer-row"><span>Role</span><span id="cfg-role" class="truncate">—</span></div>
+      <div class="rail-footer-row"><span>Encryption</span><span id="cfg-encryption">—</span></div>
+    </div>
+  </aside>
+
+  <main class="ledger">
+
+    <div class="pipeline-ticker" id="pipeline-ticker">
+      <div class="ticker-stage" data-stage="RECORDED"><span class="dot"></span>Recorded → DynamoDB</div>
+      <div class="ticker-rule"></div>
+      <div class="ticker-stage" data-stage="QUEUED"><span class="dot"></span>Queued → SQS</div>
+      <div class="ticker-rule"></div>
+      <div class="ticker-stage" data-stage="SCORED"><span class="dot"></span>Scored → fraud model</div>
+      <div class="ticker-rule"></div>
+      <div class="ticker-stage" data-stage="ALERTED"><span class="dot"></span>Alerted → SNS</div>
+    </div>
+
+    <div class="ledger-head">
+      <h1>Transaction Ledger <span id="kms-badge" class="kms-badge">—</span></h1>
+      <p>Live view of authorizations moving through S3, DynamoDB, SQS, SNS &amp; KMS.</p>
+      <div class="settlement-bar">
+        <button id="settlement-btn">Run settlement batch</button>
+        <span id="settlement-result"></span>
+      </div>
+    </div>
+
+    <div class="ledger-table-wrap">
+      <table class="ledger-table">
+        <thead>
+          <tr>
+            <th>Txn</th>
+            <th>Merchant</th>
+            <th>Card</th>
+            <th class="align-right">Amount</th>
+            <th>Stage</th>
+            <th>Risk</th>
+            <th>Receipt</th>
+          </tr>
+        </thead>
+        <tbody id="ledger-body">
+          <tr class="empty-row"><td colspan="7">No transactions yet — authorize one on the left.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

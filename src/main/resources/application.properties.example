@@ -1,0 +1,11 @@
+# Populated automatically by infrastructure/setup.sh after provisioning.
+# Values below are placeholders so the project still compiles before setup runs.
+aws.region=us-east-1
+card.service.role.arn=arn:aws:iam::000000000000:role/CardTransactionServiceRole
+card.service.external.id=card-txn-demo-external-id
+receipts.bucket=cardco-txn-receipts-demo-placeholder
+dynamodb.table=CardTransactions-demo-placeholder
+sqs.queue.url=https://sqs.us-east-1.amazonaws.com/000000000000/fraud-check-queue-demo-placeholder
+sns.topic.arn=arn:aws:sns:us-east-1:000000000000:fraud-alerts-topic-demo-placeholder
+kms.key.alias=alias/card-txn-demo-placeholder
+kms.enabled=true

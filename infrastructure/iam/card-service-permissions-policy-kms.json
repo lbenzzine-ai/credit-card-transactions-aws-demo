@@ -1,0 +1,82 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3ReceiptsAndSettlementsReadWrite",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::__RECEIPTS_BUCKET__/receipts/*",
+        "arn:aws:s3:::__RECEIPTS_BUCKET__/settlements/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        }
+      }
+    },
+    {
+      "Sid": "S3ListOwnBucketOnly",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::__RECEIPTS_BUCKET__",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["receipts/*", "settlements/*"]
+        }
+      }
+    },
+    {
+      "Sid": "DynamoDbTransactionTableAccess",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query"
+      ],
+      "Resource": "arn:aws:dynamodb:__AWS_REGION__:__AWS_ACCOUNT_ID__:table/__DYNAMODB_TABLE__"
+    },
+    {
+      "Sid": "DynamoDbStatusIndexQueryForSettlementBatch",
+      "Effect": "Allow",
+      "Action": "dynamodb:Query",
+      "Resource": "arn:aws:dynamodb:__AWS_REGION__:__AWS_ACCOUNT_ID__:table/__DYNAMODB_TABLE__/index/status-index"
+    },
+    {
+      "Sid": "SqsFraudCheckQueueAccess",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "arn:aws:sqs:__AWS_REGION__:__AWS_ACCOUNT_ID__:__SQS_QUEUE__"
+    },
+    {
+      "Sid": "SnsFraudAlertsPublishOnly",
+      "Effect": "Allow",
+      "Action": "sns:Publish",
+      "Resource": "arn:aws:sns:__AWS_REGION__:__AWS_ACCOUNT_ID__:__SNS_TOPIC__"
+    },
+    {
+      "Sid": "KmsEncryptDecryptCardKeyOnly",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "arn:aws:kms:__AWS_REGION__:__AWS_ACCOUNT_ID__:key/__KMS_KEY_ID__",
+      "Condition": {
+        "StringEquals": {
+          "kms:EncryptionContext:purpose": "card-authorization"
+        }
+      }
+    }
+  ]
+}
