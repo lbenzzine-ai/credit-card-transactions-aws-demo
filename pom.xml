@@ -88,6 +88,13 @@
             <artifactId>javalin</artifactId>
             <version>6.3.0</version>
         </dependency>
+
+        <!-- Kafka Streams: local-only velocity-check demo, see docker-compose.yml -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-streams</artifactId>
+            <version>3.7.0</version>
+        </dependency>
     </dependencies>
 
     <build>

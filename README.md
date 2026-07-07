@@ -229,6 +229,31 @@ period (`schedule-key-deletion`) — the key keeps billing during that
 window, so tear down as soon as you're done rather than right before a
 billing cycle closes.
 
+## Bonus: Kafka Streams velocity check (local only, no AWS cost)
+
+This is a genuinely separate addition from the AWS pipeline above — it runs
+against a local Kafka broker via Docker, touches no AWS resources, and
+costs nothing. It demonstrates a fraud-detection pattern the SQS-based
+pipeline structurally cannot express: a **windowed velocity check** — "has
+this card authorized 3+ transactions in the last 30 seconds?" SQS can only
+ever look at one message at a time; Kafka Streams maintains a running,
+time-bounded count per card automatically.
+
+```bash
+docker compose up -d      # starts a single-node Kafka broker (KRaft mode)
+./run-kafka-demo.sh        # builds the topology, publishes a burst of same-card
+                            # transactions, and shows a VELOCITY ALERT fire live
+docker compose down        # stop the broker when done
+```
+
+See `src/main/java/com/cardco/kafka/` — `VelocityCheckTopology.java` is the
+actual Kafka Streams DSL (`groupByKey().windowedBy(...).count()`), and
+`VelocityCheckDemo.java` runs it end-to-end. In a real system, the
+authorization service would publish to both SQS (existing fraud-scoring/
+settlement flow) and this Kafka topic (velocity checks) side by side —
+this demo is deliberately kept separate rather than wired into
+`CardAuthorizationService`, so the two stories don't get tangled together.
+
 ## Bonus: capacity planning calculators
 
 Two standalone, dependency-free reference tools (open either directly in
