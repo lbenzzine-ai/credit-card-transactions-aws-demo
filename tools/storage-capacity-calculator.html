@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Storage Capacity Planning Calculator — Hot/Warm/Cold Tier Comparison</title>
+<style>
+  :root {
+    --bg: #f7f6f2;
+    --surface: #ffffff;
+    --border: #dedad0;
+    --text-primary: #1a1a18;
+    --text-secondary: #5c5a52;
+    --text-muted: #8c8a80;
+    --accent: #1f5fae;
+    --accent-bg: #e8f0fb;
+    --warn-bg: #fdf3e3;
+    --warn-border: #e8c988;
+    --warn-text: #7a5a12;
+    --radius: 8px;
+    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  .subtitle { color: var(--text-secondary); font-size: 14px; margin: 0 0 32px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin: 0 0 20px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); }
+  .control { margin-bottom: 20px; }
+  .control:last-child { margin-bottom: 0; }
+  .control-label { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 6px; }
+  .control-label span:first-child { color: var(--text-secondary); }
+  .control-label span:last-child { font-weight: 600; font-family: var(--font-mono); }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; }
+  .results-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+  .result-box { background: var(--bg); border-radius: var(--radius); padding: 14px; text-align: center; }
+  .result-box.highlight { background: var(--accent-bg); }
+  .result-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; margin: 0 0 6px; }
+  .result-value { font-size: 20px; font-weight: 700; font-family: var(--font-mono); margin: 0; }
+  .result-value.accent { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600; }
+  td.num { font-family: var(--font-mono); text-align: right; }
+  .savings-note { font-size: 13px; color: var(--text-secondary); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .savings-note strong { color: var(--accent); }
+  .caveats { list-style: none; margin: 0; padding: 0; }
+  .caveats li {
+    display: flex; gap: 12px; padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .caveats li:last-child { border-bottom: none; }
+  .caveat-num {
+    flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    color: var(--warn-text); font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .caveat-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  .caveat-text span { font-size: 13px; color: var(--text-secondary); }
+  .talking-point {
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    border-radius: var(--radius); padding: 16px; margin-top: 20px;
+    font-size: 14px; color: #3a3220;
+  }
+  .talking-point-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; color: var(--warn-text); font-style: normal;
+    margin: 0 0 8px; display: flex; align-items: center; gap: 6px;
+  }
+  .talking-point-label svg { flex-shrink: 0; }
+  footer { text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Data storage capacity planning calculator</h1>
+  <p class="subtitle">Projects total storage footprint over a retention period, accounting for secondary-index overhead and replication, then compares monthly cost across a hot (DynamoDB), warm (S3 Standard), and cold (S3 Glacier Deep Archive) storage tier.</p>
+
+  <div class="card">
+    <h2>Inputs</h2>
+    <div class="control">
+      <div class="control-label"><span>Records written per day</span><span id="daily-out">50,000</span></div>
+      <input type="range" min="100" max="5000000" step="100" value="50000" id="daily">
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Average item size (KB)</span><span id="size-out">2</span></div>
+      <input type="range" min="0.5" max="400" step="0.5" value="2" id="size">
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Retention period (years)</span><span id="years-out">7</span></div>
+      <input type="range" min="1" max="20" step="1" value="7" id="years">
+      <p class="hint">Financial transaction records are commonly required to be retained around 7 years under various regulations — check what applies to your data before shortening this.</p>
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Annual growth rate (%)</span><span id="growth-out">15</span></div>
+      <input type="range" min="0" max="100" step="5" value="15" id="growth">
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Full-projection secondary indexes (GSIs)</span><span id="gsi-out">1</span></div>
+      <input type="range" min="0" max="5" step="1" value="1" id="gsi">
+      <p class="hint">A GSI with ProjectionType=ALL stores a full second copy of every indexed item — each one roughly doubles storage for that data.</p>
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Replication factor (regions/copies)</span><span id="repl-out">1</span></div>
+      <input type="range" min="1" max="5" step="1" value="1" id="repl">
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Projected footprint</h2>
+    <div class="results-grid">
+      <div class="result-box">
+        <p class="result-label">Total items</p>
+        <p class="result-value" id="items-result">0</p>
+      </div>
+      <div class="result-box">
+        <p class="result-label">Raw storage</p>
+        <p class="result-value" id="raw-result">0 GB</p>
+      </div>
+      <div class="result-box highlight">
+        <p class="result-label">With indexes + replication</p>
+        <p class="result-value accent" id="total-result">0 GB</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Compare storage tiers at that footprint</h2>
+    <table>
+      <thead>
+        <tr><th>Tier</th><th class="num">Price/GB-month</th><th class="num">Monthly cost</th><th class="num">vs. DynamoDB</th></tr>
+      </thead>
+      <tbody id="comparison-body"></tbody>
+    </table>
+    <div class="savings-note" id="savings-note"></div>
+  </div>
+
+  <div class="card">
+    <h2>Before you present this footprint or cost number</h2>
+    <ul class="caveats">
+      <li>
+        <div class="caveat-num">1</div>
+        <div class="caveat-text">
+          <strong>Cold tiers trade cost for retrieval time and fee.</strong>
+          <span>S3 Glacier Deep Archive is roughly 23x cheaper than S3 Standard, but retrieval takes 12-48 hours and incurs its own per-GB fee. It's for compliance archives you'll rarely if ever read back — not for anything a live query needs.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">2</div>
+        <div class="caveat-text">
+          <strong>Full-projection GSIs are the most overlooked storage cost.</strong>
+          <span>ProjectionType=ALL duplicates the entire item per index. If a query only needs a few attributes, KEYS_ONLY or INCLUDE projections can avoid doubling storage for every additional index.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">3</div>
+        <div class="caveat-text">
+          <strong>Retention minimums are usually set by compliance, not engineering.</strong>
+          <span>Shrinking a retention period to save storage cost is a legal/compliance decision, not a technical one — confirm the actual regulatory requirement before treating retention as a tunable.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">4</div>
+        <div class="caveat-text">
+          <strong>Growth compounds more than intuition suggests over long retention windows.</strong>
+          <span>A modest 15%/year growth rate roughly triples total volume over a 7-year retention period — small assumptions early in the input meaningfully change the final number.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">5</div>
+        <div class="caveat-text">
+          <strong>Cold storage classes have minimum storage durations and object-count overhead.</strong>
+          <span>S3 Glacier Deep Archive has a 180-day minimum (early deletion is billed as if it stayed the full period), and each archived object carries roughly 40KB of metadata overhead — this penalizes archiving huge numbers of very small objects.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">6</div>
+        <div class="caveat-text">
+          <strong>This covers storage only, not request/throughput costs.</strong>
+          <span>DynamoDB read/write request pricing, S3 PUT/GET/LIST request fees, and data transfer costs are separate line items not modeled here — a full cost picture needs those too.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">7</div>
+        <div class="caveat-text">
+          <strong>Unit prices are illustrative, not live.</strong>
+          <span>Figures shown are approximate us-east-1 rates at a point in time — always check current AWS pricing before using this for a real budget commitment.</span>
+        </div>
+      </li>
+    </ul>
+
+    <div class="talking-point">
+      <p class="talking-point-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        Please note
+      </p>
+      A common, defensible pattern is tiered storage rather than one tier for everything: keep recent, frequently
+      queried data in DynamoDB for millisecond access; move data past a defined age into S3 Standard once it's
+      rarely queried directly; and transition anything held purely for compliance into S3 Glacier Deep Archive
+      once it's essentially never going to be read. The cost difference between tiers is large enough that this
+      lifecycle strategy is usually worth the added complexity for any dataset retained more than a year or two.
+    </div>
+  </div>
+
+  <footer>Total items = Σ over each year of (daily records × 365 × (1 + growth)^year). Storage = total items × item size × (1 + full-projection GSIs) × replication factor.</footer>
+
+</div>
+
+<script>
+  const ids = ['daily', 'size', 'years', 'growth', 'gsi', 'repl'];
+  const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
+
+  const PRICE_PER_GB_MONTH = {
+    dynamodb: 0.25,
+    s3standard: 0.023,
+    glacierDeep: 0.00099,
+  };
+
+  function computeTotalItems(dailyItems, retentionYears, growthPct) {
+    let total = 0;
+    for (let y = 0; y < retentionYears; y++) {
+      total += dailyItems * 365 * Math.pow(1 + growthPct / 100, y);
+    }
+    return total;
+  }
+
+  function formatGB(gb) {
+    if (gb >= 1024 * 1024) return (gb / (1024 * 1024)).toFixed(2) + ' PB';
+    if (gb >= 1024) return (gb / 1024).toFixed(2) + ' TB';
+    return gb.toFixed(2) + ' GB';
+  }
+
+  function formatCost(cost) {
+    if (cost >= 1000) return '$' + cost.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    return '$' + cost.toFixed(2);
+  }
+
+  function recalc() {
+    const dailyItems = parseInt(el.daily.value);
+    const itemSizeKb = parseFloat(el.size.value);
+    const retentionYears = parseInt(el.years.value);
+    const growthPct = parseInt(el.growth.value);
+    const numGsi = parseInt(el.gsi.value);
+    const replFactor = parseInt(el.repl.value);
+
+    document.getElementById('daily-out').textContent = dailyItems.toLocaleString();
+    document.getElementById('size-out').textContent = itemSizeKb;
+    document.getElementById('years-out').textContent = retentionYears;
+    document.getElementById('growth-out').textContent = growthPct;
+    document.getElementById('gsi-out').textContent = numGsi;
+    document.getElementById('repl-out').textContent = replFactor;
+
+    const totalItems = computeTotalItems(dailyItems, retentionYears, growthPct);
+    const rawGb = (totalItems * itemSizeKb) / (1024 * 1024);
+    const totalGb = rawGb * (1 + numGsi) * replFactor;
+
+    document.getElementById('items-result').textContent = Math.round(totalItems).toLocaleString();
+    document.getElementById('raw-result').textContent = formatGB(rawGb);
+    document.getElementById('total-result').textContent = formatGB(totalGb);
+
+    const dynamoCost = totalGb * PRICE_PER_GB_MONTH.dynamodb;
+    const s3Cost = totalGb * PRICE_PER_GB_MONTH.s3standard;
+    const glacierCost = totalGb * PRICE_PER_GB_MONTH.glacierDeep;
+
+    const rows = [
+      { name: 'DynamoDB (hot, milliseconds)', price: PRICE_PER_GB_MONTH.dynamodb, cost: dynamoCost, vs: '—' },
+      { name: 'S3 Standard (warm, milliseconds)', price: PRICE_PER_GB_MONTH.s3standard, cost: s3Cost, vs: '-' + Math.round((1 - s3Cost / dynamoCost) * 100) + '%' },
+      { name: 'S3 Glacier Deep Archive (cold, 12-48hr)', price: PRICE_PER_GB_MONTH.glacierDeep, cost: glacierCost, vs: '-' + Math.round((1 - glacierCost / dynamoCost) * 100) + '%' },
+    ];
+
+    document.getElementById('comparison-body').innerHTML = rows.map(row => `
+      <tr>
+        <td>${row.name}</td>
+        <td class="num">$${row.price}</td>
+        <td class="num">${formatCost(row.cost)}/mo</td>
+        <td class="num">${row.vs}</td>
+      </tr>
+    `).join('');
+
+    const multiplier = glacierCost > 0 ? (dynamoCost / glacierCost).toFixed(0) : '—';
+    document.getElementById('savings-note').innerHTML =
+      `Keeping this same ${formatGB(totalGb)} in DynamoDB year-round costs <strong>${formatCost(dynamoCost)}/month</strong>; ` +
+      `archiving it to S3 Glacier Deep Archive instead costs <strong>${formatCost(glacierCost)}/month</strong> — roughly ` +
+      `${multiplier}x cheaper, at the cost of 12-48 hour retrieval time. See the caveats below before treating this as a straightforward win.`;
+  }
+
+  ids.forEach(id => el[id].addEventListener('input', recalc));
+  recalc();
+</script>
+</body>
+</html>
