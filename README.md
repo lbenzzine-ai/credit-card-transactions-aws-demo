@@ -229,6 +229,17 @@ period (`schedule-key-deletion`) — the key keeps billing during that
 window, so tear down as soon as you're done rather than right before a
 billing cycle closes.
 
+## Bonus: JVM capacity planning calculator
+
+`tools/capacity-calculator.html` is a standalone, dependency-free reference
+tool (open it directly in any browser, no server needed) that applies
+Little's Law (`concurrency = throughput × latency`) to compare three I/O
+models side by side: blocking platform threads, blocking virtual threads
+(Java 21+), and non-blocking/async. It bakes in the honest caveats around
+claiming an instance-count reduction from virtual threads — downstream
+dependency capacity, CPU-bound vs I/O-bound work, blast radius, and the
+need for real load testing — rather than just showing an optimistic number.
+
 ## Starting fresh between runs
 
 By default, every run adds to what's already there — DynamoDB accumulates

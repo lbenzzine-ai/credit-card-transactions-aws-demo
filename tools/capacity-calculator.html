@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JVM Capacity Planning Calculator — Little's Law + I/O Model Comparison</title>
+<style>
+  :root {
+    --bg: #f7f6f2;
+    --surface: #ffffff;
+    --border: #dedad0;
+    --text-primary: #1a1a18;
+    --text-secondary: #5c5a52;
+    --text-muted: #8c8a80;
+    --accent: #1f5fae;
+    --accent-bg: #e8f0fb;
+    --warn-bg: #fdf3e3;
+    --warn-border: #e8c988;
+    --warn-text: #7a5a12;
+    --radius: 8px;
+    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  .subtitle { color: var(--text-secondary); font-size: 14px; margin: 0 0 32px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin: 0 0 20px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); }
+  .control { margin-bottom: 20px; }
+  .control:last-child { margin-bottom: 0; }
+  .control-label { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 6px; }
+  .control-label span:first-child { color: var(--text-secondary); }
+  .control-label span:last-child { font-weight: 600; font-family: var(--font-mono); }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  select {
+    width: 100%; padding: 8px 10px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--surface);
+    font-size: 14px; color: var(--text-primary);
+  }
+  .hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; }
+  .results-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 20px; }
+  .result-box { background: var(--bg); border-radius: var(--radius); padding: 14px; text-align: center; }
+  .result-box.highlight { background: var(--accent-bg); }
+  .result-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; margin: 0 0 6px; }
+  .result-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono); margin: 0; }
+  .result-value.accent { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600; }
+  td.num { font-family: var(--font-mono); text-align: right; }
+  tr.current td { background: var(--accent-bg); font-weight: 600; }
+  .savings-note { font-size: 13px; color: var(--text-secondary); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .savings-note strong { color: var(--accent); }
+  .caveats { list-style: none; margin: 0; padding: 0; }
+  .caveats li {
+    display: flex; gap: 12px; padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .caveats li:last-child { border-bottom: none; }
+  .caveat-num {
+    flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    color: var(--warn-text); font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .caveat-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  .caveat-text span { font-size: 13px; color: var(--text-secondary); }
+  .talking-point {
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    border-radius: var(--radius); padding: 16px; margin-top: 20px;
+    font-size: 14px; font-style: italic; color: #3a3220;
+  }
+  .talking-point-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; color: var(--warn-text); font-style: normal;
+    margin: 0 0 8px;
+  }
+  footer { text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>JVM capacity planning calculator</h1>
+  <p class="subtitle">Little's Law (concurrency = throughput × latency) applied to compare blocking platform threads, virtual threads, and async I/O — with the caveats that keep the comparison honest.</p>
+
+  <div class="card">
+    <h2>Inputs</h2>
+    <div class="control">
+      <div class="control-label"><span>Throughput (requests/sec)</span><span id="tp-out">5000</span></div>
+      <input type="range" min="100" max="20000" step="100" value="5000" id="tp">
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Latency SLA (ms)</span><span id="lat-out">200</span></div>
+      <input type="range" min="10" max="1000" step="10" value="200" id="lat">
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Redundancy + peak buffer</span><span id="buf-out">25%</span></div>
+      <input type="range" min="0" max="100" step="5" value="25" id="buf">
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Platform thread pool size</span><span id="threads-out">50</span></div>
+      <input type="range" min="10" max="1000" step="10" value="50" id="threads">
+      <p class="hint">Each reserved platform thread costs real memory (~0.5-1MB stack) — this is why the pool stays small.</p>
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Heap available per instance for in-flight requests (MB)</span><span id="heap-out">1024</span></div>
+      <input type="range" min="128" max="8192" step="128" value="1024" id="heap">
+    </div>
+    <div class="control">
+      <div class="control-label"><span>Memory per in-flight request (MB)</span><span id="mem-out">2</span></div>
+      <input type="range" min="0.5" max="20" step="0.5" value="2" id="mem">
+      <p class="hint">Virtual threads / async: no per-thread ceiling — capacity is bounded by memory instead.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Compare all three I/O models</h2>
+    <table>
+      <thead>
+        <tr><th>Model</th><th class="num">Capacity/instance</th><th class="num">Raw instances</th><th class="num">With buffer</th></tr>
+      </thead>
+      <tbody id="comparison-body"></tbody>
+    </table>
+    <div class="savings-note" id="savings-note"></div>
+  </div>
+
+  <div class="card">
+    <h2>Before you present this savings number</h2>
+    <ul class="caveats">
+      <li>
+        <div class="caveat-num">1</div>
+        <div class="caveat-text">
+          <strong>Only I/O-wait time benefits — not CPU-bound work.</strong>
+          <span>Virtual threads are cheap because they park during I/O waits. If part of your request is real computation (serialization, crypto, validation), that portion is still bound by CPU cores per instance, not thread count.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">2</div>
+        <div class="caveat-text">
+          <strong>You've concentrated load, not eliminated it.</strong>
+          <span>Whether spread across 25 instances or 3, your downstream dependency (fraud-check, DB, etc.) still receives the same total concurrent calls — now from fewer source hosts, which can trip its own connection limits or rate limits.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">3</div>
+        <div class="caveat-text">
+          <strong>Blast radius gets worse with fewer instances.</strong>
+          <span>Losing 1 of 25 costs ~4% of capacity. Losing 1 of 3 costs ~33%, instantly. Provision above the bare mathematical minimum specifically to keep this sane.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">4</div>
+        <div class="caveat-text">
+          <strong>Per-instance cost goes up.</strong>
+          <span>Holding hundreds of concurrent requests' worth of heap needs meaningfully more memory per box. This is "fewer, bigger, somewhat-more-expensive-each" instances, not the same box with fewer copies.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">5</div>
+        <div class="caveat-text">
+          <strong>Watch for virtual thread pinning.</strong>
+          <span><code>synchronized</code> blocks or certain legacy JDBC drivers can pin a virtual thread to its carrier thread during a blocking call, silently defeating the benefit. Validate against your actual dependency stack.</span>
+        </div>
+      </li>
+      <li>
+        <div class="caveat-num">6</div>
+        <div class="caveat-text">
+          <strong>This is a planning estimate, not a commitment.</strong>
+          <span>The real number comes from load testing under realistic conditions — especially GC behavior at much higher heap utilization per instance.</span>
+        </div>
+      </li>
+    </ul>
+
+    <div class="talking-point">
+      <p class="talking-point-label">How to say it out loud</p>
+      "Moving to virtual threads could meaningfully reduce our instance count — potentially 8-10x fewer boxes for the
+      same throughput, since we're no longer bounded by thread pool size. That said, I'd want to validate three things
+      before committing to a number: whether our downstream dependency can absorb that same concurrent load now
+      concentrated on fewer hosts, whether any part of our request path is CPU-bound rather than I/O-bound, and I'd
+      still provision above the bare-minimum number for redundancy and blast-radius reasons. The cost savings are
+      real, but I'd want load-test numbers before presenting a final figure."
+    </div>
+  </div>
+
+  <footer>Little's Law: concurrency = throughput × latency. Capacity per instance = thread pool size (platform threads) or heap ÷ memory-per-request (virtual threads / async).</footer>
+
+</div>
+
+<script>
+  const ids = ['tp', 'lat', 'buf', 'threads', 'heap', 'mem'];
+  const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
+
+  function computeModel(throughput, latencyMs, bufferPct, capacityPerInstance) {
+    const concurrency = throughput * (latencyMs / 1000);
+    const raw = Math.ceil(concurrency / capacityPerInstance);
+    const withBuffer = Math.ceil(raw * (1 + bufferPct / 100));
+    return { concurrency, raw, withBuffer };
+  }
+
+  function recalc() {
+    const throughput = parseInt(el.tp.value);
+    const latencyMs = parseInt(el.lat.value);
+    const bufferPct = parseInt(el.buf.value);
+    const threadCap = parseInt(el.threads.value);
+    const heapMb = parseFloat(el.heap.value);
+    const memMb = parseFloat(el.mem.value);
+    const memoryCap = Math.floor(heapMb / memMb);
+
+    document.getElementById('tp-out').textContent = throughput.toLocaleString();
+    document.getElementById('lat-out').textContent = latencyMs;
+    document.getElementById('buf-out').textContent = bufferPct + '%';
+    document.getElementById('threads-out').textContent = threadCap;
+    document.getElementById('heap-out').textContent = heapMb;
+    document.getElementById('mem-out').textContent = memMb;
+
+    const platform = computeModel(throughput, latencyMs, bufferPct, threadCap);
+    const virtualThreads = computeModel(throughput, latencyMs, bufferPct, memoryCap);
+    const async_ = computeModel(throughput, latencyMs, bufferPct, memoryCap);
+
+    const rows = [
+      { name: 'Blocking — platform threads', cap: threadCap, r: platform },
+      { name: 'Blocking — virtual threads', cap: memoryCap, r: virtualThreads },
+      { name: 'Non-blocking / async', cap: memoryCap, r: async_ },
+    ];
+
+    document.getElementById('comparison-body').innerHTML = rows.map(row => `
+      <tr>
+        <td>${row.name}</td>
+        <td class="num">${row.cap.toLocaleString()}</td>
+        <td class="num">${row.r.raw.toLocaleString()}</td>
+        <td class="num">${row.r.withBuffer.toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    const reduction = platform.withBuffer > 0
+      ? Math.round((1 - virtualThreads.withBuffer / platform.withBuffer) * 100)
+      : 0;
+    const multiplier = virtualThreads.withBuffer > 0
+      ? (platform.withBuffer / virtualThreads.withBuffer).toFixed(1)
+      : '—';
+
+    document.getElementById('savings-note').innerHTML =
+      `Switching from platform threads to virtual threads: <strong>${platform.withBuffer} → ${virtualThreads.withBuffer} instances</strong> ` +
+      `(~${reduction}% fewer, ${multiplier}x reduction) for the same throughput and latency target — see the caveats below before presenting this as a final number.`;
+  }
+
+  ids.forEach(id => el[id].addEventListener('input', recalc));
+  recalc();
+</script>
+</body>
+</html>
