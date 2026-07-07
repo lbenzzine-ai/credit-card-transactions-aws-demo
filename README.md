@@ -10,6 +10,52 @@ service would (a scoped-down IAM user that assumes a role, never using
 long-lived admin credentials), and includes both a CLI walkthrough and a
 small web dashboard.
 
+## Quick start
+
+This project has four independent, runnable pieces. Pick what you need —
+none of them require the others.
+
+### 1. AWS demo (real S3/DynamoDB/SQS/SNS/KMS in your own account)
+
+```bash
+export AWS_REGION=us-east-1
+./infrastructure/setup.sh                 # provisions everything, ~1 min
+
+export AWS_ACCESS_KEY_ID=$(grep SERVICE_ACCOUNT_ACCESS_KEY_ID infrastructure/.env | cut -d= -f2-)
+export AWS_SECRET_ACCESS_KEY=$(grep SERVICE_ACCOUNT_SECRET_ACCESS_KEY infrastructure/.env | cut -d= -f2-)
+export AWS_REGION=us-east-1
+
+./run-demo.sh                              # authorize → fraud-score → settle
+```
+Costs ~$1/month (the KMS key) until you run `./infrastructure/teardown.sh` — see **Cost** below.
+
+### 2. Web dashboard (same AWS pipeline, browser UI)
+
+```bash
+PORT=8080 ./run-webapp.sh
+# then open http://localhost:8080
+```
+Requires step 1 to have been run first (needs the same exported credentials).
+
+### 3. Kafka Streams velocity check (100% local, free, no AWS at all)
+
+```bash
+docker compose up -d       # starts a local Kafka broker
+./run-kafka-demo.sh         # publishes a burst of transactions, watch for a VELOCITY ALERT
+docker compose down         # stop the broker when done
+```
+
+### 4. Capacity planning calculators (zero setup — just open them)
+
+```bash
+open tools/capacity-calculator.html            # JVM / Little's Law
+open tools/storage-capacity-calculator.html    # storage tiers & cost
+```
+
+Everything below explains *why* each piece is built the way it is — the
+architecture, the IAM design, the bugs found and fixed along the way, and
+the full detail behind each command above.
+
 ## What this demonstrates
 
 - **Authorization**: idempotent writes to DynamoDB (a retried request is
